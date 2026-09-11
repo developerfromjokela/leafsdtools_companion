@@ -619,7 +619,7 @@ func main() {
 	w.SetContent(container.NewPadded(mainContent))
 	w.Resize(fyne.NewSize(820, 520))
 
-	logAppend("Leaf SD Tools Companion v1.0.5")
+	logAppend("Leaf SD Tools Companion v1.0.6")
 	logAppend("https://github.com/developerfromjokela/leafsdtools_companion")
 	logAppend("NOTE — always keep a backup of the original SD card.")
 
