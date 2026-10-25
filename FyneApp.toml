@@ -3,7 +3,7 @@ Name = "leafsdtools_companion"
 ID = "leafsdtools_companion"
 Version = "1.0.6"
 Build = 0
-Icon = ./Icon.png
+Icon = "Icon.png"
 
 [Migrations]
 fyneDo = true

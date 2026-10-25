@@ -2,6 +2,7 @@ package main
 
 import (
 	"LeafSDTools_Companion/disk"
+	"LeafSDTools_Companion/patch"
 	"LeafSDTools_Companion/privilege"
 	"LeafSDTools_Companion/utils"
 	"bytes"
@@ -11,7 +12,10 @@ import (
 	"image/color"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -592,6 +596,323 @@ func buildRestoreTab() fyne.CanvasObject {
 	)
 }
 
+func copyOrCloneFile(src, dst string) error {
+	if runtime.GOOS == "darwin" {
+		cmd := exec.Command("cp", "-c", src, dst)
+		if err := cmd.Run(); err == nil {
+			return nil
+		}
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func applyAutoAgreePatchUI(targetPath string, isDevice bool, createBackup bool, mode patch.PatchMode, delayMs uint32, onDone func(err error)) {
+	logAppend("\n────────────────────────────────────────")
+	logAppend("Applying Auto-Agree Telematics Patch")
+	var hold disk.VolumeHold
+	if isDevice {
+		logAppend(fmt.Sprintf("Target device: %s", targetPath))
+		logAppend("Locking/unmounting volumes...")
+		var herr error
+		hold, herr = disk.HoldDeviceVolumes(targetPath)
+		if herr != nil {
+			logAppend("Could not reserve device: " + herr.Error())
+			onDone(herr)
+			return
+		} else if hold != nil {
+			defer hold.Close()
+		}
+	} else {
+		logAppend(fmt.Sprintf("Target image: %s", targetPath))
+	}
+
+	rw, size, err := disk.OpenDeviceForReadWrite(targetPath)
+	if err != nil {
+		logAppend(fmt.Sprintf("Cannot open for read/write: %v", err))
+		onDone(err)
+		return
+	}
+	defer rw.Close()
+
+	type ra interface {
+		io.ReaderAt
+		io.WriterAt
+	}
+	f, ok := rw.(ra)
+	if !ok {
+		err := errors.New("opened target does not support random access")
+		logAppend(err.Error())
+		onDone(err)
+		return
+	}
+
+	if size > 0 {
+		logAppend(fmt.Sprintf("Target size: %s", utils.HumanSize(size)))
+	}
+
+	// Pre-flight check: find .mod and verify it is stock and unpatched before writing or backing up
+	logAppend("Scanning for navigation image...")
+	at, b, err := patch.FindMod(f, size)
+	if err != nil {
+		logAppend("Failed to locate navigation image: " + err.Error())
+		onDone(err)
+		return
+	}
+	logAppend(fmt.Sprintf("Found %s at offset %#x (%d bytes)", b.Name, at, b.ModLen))
+
+	m := make([]byte, b.ModLen)
+	if _, err := f.ReadAt(m, at); err != nil {
+		err := fmt.Errorf("failed to read .mod: %w", err)
+		logAppend(err.Error())
+		onDone(err)
+		return
+	}
+
+	isStock, patchedMode, err := patch.CheckModStatus(m, b)
+	if err != nil {
+		logAppend("Image check error: " + err.Error())
+		onDone(err)
+		return
+	}
+	if !isStock {
+		err := fmt.Errorf("navigation image is already patched (%s detected)", patchedMode)
+		logAppend(err.Error())
+		onDone(err)
+		return
+	}
+
+	// If backing up a disk image: create backup only after pre-flight passes!
+	if !isDevice && createBackup {
+		bakPath := targetPath + ".bak"
+		if _, err := os.Stat(bakPath); err == nil {
+			logAppend(fmt.Sprintf("Existing backup found at %s; keeping original without overwriting.", bakPath))
+		} else {
+			logAppend(fmt.Sprintf("Creating backup copy: %s", bakPath))
+			if err := copyOrCloneFile(targetPath, bakPath); err != nil {
+				errMsg := fmt.Sprintf("Error creating backup: %v; aborting patch to protect original file.", err)
+				logAppend(errMsg)
+				onDone(fmt.Errorf("backup failed: %w", err))
+				return
+			}
+			logAppend("Backup created successfully.")
+		}
+	}
+
+	res, err := patch.ApplyAutoAgreePatch(f, size, mode, delayMs, logAppend)
+	if err != nil {
+		logAppend("Patch failed: " + err.Error())
+		onDone(err)
+		return
+	}
+
+	logAppend(fmt.Sprintf("Build %s patched successfully in %s mode!", res.BuildName, res.Mode))
+	logAppend("Done. You can now use this card/image in the head unit.")
+	logAppend("────────────────────────────────────────")
+	onDone(nil)
+}
+
+func buildPatchesTab() fyne.CanvasObject {
+	status := widget.NewLabel("Choose a target, select mode, then apply the patch.")
+	status.Wrapping = fyne.TextWrapWord
+
+	var imagePath string
+	var selectedDevice disk.Device
+	deviceByLabel := map[string]disk.Device{}
+
+	imageLabel := widget.NewLabel("No image selected")
+	imageLabel.Wrapping = fyne.TextWrapWord
+
+	deviceSelect := widget.NewSelect(nil, nil)
+	deviceSelect.PlaceHolder = "Select device..."
+	deviceSelect.Hide()
+
+	refreshDevices := func() {
+		list, err := disk.ListDevices()
+		if err != nil {
+			logAppend("Failed to list devices: " + err.Error())
+			return
+		}
+		deviceByLabel = map[string]disk.Device{}
+		opts := make([]string, len(list))
+		for i, d := range list {
+			opts[i] = d.String()
+			deviceByLabel[d.String()] = d
+		}
+		deviceSelect.Options = opts
+		deviceSelect.ClearSelected()
+		deviceSelect.Refresh()
+	}
+
+	chooseImageBtn := widget.NewButton("Choose image file (.img, .bin)...", func() {
+		filename, err := filedialog.File().Filter("Disk Image (*.img, *.bin)", "img", "bin").Load()
+		if err != nil {
+			logAppend("Open dialog error: " + err.Error())
+			return
+		}
+		if filename == "" {
+			return
+		}
+		imagePath = filename
+		imageLabel.SetText(filepath.Base(filename))
+	})
+
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), refreshDevices)
+	refreshBtn.Hide()
+
+	deviceRow := container.NewBorder(nil, nil, nil, refreshBtn, deviceSelect)
+	deviceRow.Hide()
+
+	backupCheck := widget.NewCheck("Create .bak backup copy before patching", nil)
+	backupCheck.SetChecked(true)
+
+	modeRadio := widget.NewRadioGroup([]string{"Disk image (.img, .bin)", "Physical device"}, func(s string) {
+		switch s {
+		case "Disk image (.img, .bin)":
+			chooseImageBtn.Show()
+			imageLabel.Show()
+			backupCheck.Show()
+			deviceRow.Hide()
+			deviceSelect.Hide()
+			refreshBtn.Hide()
+		case "Physical device":
+			chooseImageBtn.Hide()
+			imageLabel.Hide()
+			backupCheck.Hide()
+			deviceRow.Show()
+			deviceSelect.Show()
+			refreshBtn.Show()
+			refreshDevices()
+		}
+	})
+	modeRadio.SetSelected("Disk image (.img, .bin)")
+	modeRadio.Horizontal = true
+
+	modeDesc := widget.NewLabel("Consent screen never appears; telematics agreement is handled automatically on each boot (ZE1 2018+ and ZE0 2014-2017).")
+	modeDesc.Wrapping = fyne.TextWrapWord
+
+	delayEntry := widget.NewEntry()
+	delayEntry.SetText("2000")
+	delayLabel := widget.NewLabel("Delay (ms):")
+	delayRow := container.NewHBox(delayLabel, delayEntry)
+	delayRow.Hide()
+
+	patchModeRadio := widget.NewRadioGroup([]string{"Skip consent screen (instant)", "Auto-click OK timer"}, func(s string) {
+		switch s {
+		case "Skip consent screen (instant)":
+			modeDesc.SetText("Consent screen never appears; telematics agreement is handled automatically on each boot (ZE1 2018+ and ZE0 2014-2017).")
+			delayRow.Hide()
+		case "Auto-click OK timer":
+			modeDesc.SetText("Consent screen appears normally and automatically triggers OK click after delay (ZE1 only).")
+			delayRow.Show()
+		}
+	})
+	patchModeRadio.SetSelected("Skip consent screen (instant)")
+
+	applyBtn := widget.NewButton("Apply patch", nil)
+	applyBtn.Importance = widget.HighImportance
+
+	busy := false
+	applyBtn.OnTapped = func() {
+		if busy {
+			return
+		}
+		var targetPath string
+		var isDevice bool
+
+		if modeRadio.Selected == "Physical device" {
+			d, ok := deviceByLabel[deviceSelect.Selected]
+			if !ok {
+				logAppend("Please select a device first.")
+				return
+			}
+			selectedDevice = d
+			targetPath = selectedDevice.Path
+			isDevice = true
+
+			warn := fmt.Sprintf(
+				"This will patch navigation data directly on:\n\n  %s\n  %s\n\nEnsure you have an SD card backup before continuing. Proceed?",
+				d.Name, d.Path,
+			)
+			if !filedialog.Message("%s", warn).Title("Confirm patch").YesNo() {
+				return
+			}
+		} else {
+			if imagePath == "" {
+				logAppend("Please choose an image file first.")
+				return
+			}
+			targetPath = imagePath
+			isDevice = false
+		}
+
+		pm := patch.ModeSkip
+		delayMs := uint32(2000)
+		if patchModeRadio.Selected == "Auto-click OK timer" {
+			pm = patch.ModeTimer
+			parsedDelay, err := strconv.ParseUint(strings.TrimSpace(delayEntry.Text), 10, 32)
+			if err != nil || parsedDelay == 0 || parsedDelay > 65535 {
+				logAppend("Invalid timer delay: must be an integer between 1 and 65535 ms (e.g. 2000).")
+				return
+			}
+			delayMs = uint32(parsedDelay)
+		}
+
+		busy = true
+		applyBtn.Disable()
+		status.SetText("Applying patch...")
+
+		doBackup := backupCheck.Checked && !isDevice
+		go applyAutoAgreePatchUI(targetPath, isDevice, doBackup, pm, delayMs, func(err error) {
+			fyne.Do(func() {
+				busy = false
+				applyBtn.Enable()
+				if err != nil {
+					status.SetText("Patching failed: " + err.Error())
+				} else {
+					status.SetText("Patch applied successfully!")
+				}
+			})
+		})
+	}
+
+	noteLabel := widget.NewLabel("Note: The head unit executes nav from SD only if its header matches the installed NAND firmware.")
+	noteLabel.Wrapping = fyne.TextWrapWord
+
+	return container.NewVBox(
+		widget.NewLabelWithStyle("Auto-Agree Telematics Consent Patch", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Automatically passes the startup navigation consent prompt on Clarion QY8xxx (Nissan Leaf)."),
+		noteLabel,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Patch method:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		patchModeRadio,
+		modeDesc,
+		delayRow,
+		widget.NewSeparator(),
+		widget.NewLabelWithStyle("Target:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		modeRadio,
+		chooseImageBtn,
+		imageLabel,
+		backupCheck,
+		deviceRow,
+		layout.NewSpacer(),
+		status,
+		applyBtn,
+	)
+}
+
 func main() {
 	if privilege.RunHelperIfRequested() {
 		return
@@ -609,10 +930,7 @@ func main() {
 		container.NewTabItem("Fix partitions", buildFixTab()),
 		container.NewTabItem("Backup", buildBackupTab()),
 		container.NewTabItem("Restore", buildRestoreTab()),
-		container.NewTabItem("Patches", container.NewVBox(
-			widget.NewLabelWithStyle("Patches", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel("TODO — not ready yet"),
-		)),
+		container.NewTabItem("Patches", buildPatchesTab()),
 	)
 
 	mainContent := container.NewBorder(tabs, nil, nil, nil, logEntry)
