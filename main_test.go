@@ -1,7 +1,9 @@
 package main
 
 import (
+	"LeafSDTools_Companion/patch/wince"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -230,5 +232,51 @@ func TestCorrectPartitionTypesUnknownSize(t *testing.T) {
 	}
 	if got := mbr[446+16+4]; got != 0x0C {
 		t.Errorf("partition 2: type = 0x%02X, want 0x0C left untouched\nlog:\n%v", got, logged)
+	}
+}
+
+func TestWinCEKernelUtility(t *testing.T) {
+	imageFile := ""
+
+	offsetGiven := false
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		os.Exit(1)
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		os.Exit(1)
+	}
+
+	var ex *wince.Extractor
+	if offsetGiven {
+		ex, err = wince.NewExtractorAt(image, 0)
+	} else {
+		ex, err = wince.NewExtractor(image)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to analyze %s: %v\n", imageFile, err)
+		os.Exit(1)
+	}
+
+	fmt.Println("FILES")
+	for _, f := range ex.Files {
+		fmt.Println(f.Name)
+		fmt.Println("  ", f.Entry.FileAttributes)
+		fmt.Printf("   %+v\n", f.Entry.FileTime.Unix())
+		fmt.Println("  ", f.Entry.RealFileSize)
+		fmt.Println("  ", f.Entry.CompFileSize)
+		fmt.Println("  ", f.Entry.FileNamePtr)
+		fmt.Println("  ", f.Entry.LoadOffset)
+	}
+	fmt.Println("Modules")
+	for _, m := range ex.Modules {
+		fmt.Println(m.Name)
+		fmt.Println("  ", m.Toc.FileAttributes)
+		fmt.Printf("   %+v\n", m.Toc.FileTime.Unix())
+		fmt.Println("  ", m.Toc.FileSize)
 	}
 }
