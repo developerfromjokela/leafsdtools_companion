@@ -4,8 +4,11 @@
 package qy8consent
 
 import (
+	"LeafSDTools_Companion/patch"
+	"LeafSDTools_Companion/patch/common"
 	"bytes"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -20,11 +23,6 @@ const (
 	maxContainerSize = 256 << 20
 	maxUnpackedSize  = 512 << 20
 )
-
-type ReadWriterAt interface {
-	io.ReaderAt
-	io.WriterAt
-}
 
 type Target struct {
 	Offset int64
@@ -47,7 +45,7 @@ type Result struct {
 const ProbeOffset = 0x4d00000
 
 func Find(f io.ReaderAt, size int64) (Target, error) {
-	f = directReader(f, size)
+	f = common.DirectReader(f, size)
 	if t, found, err := probeFixed(f, size); found {
 		return t, err
 	}
@@ -147,8 +145,8 @@ type PageWrite struct {
 	Data   []byte
 }
 
-func PlanConsentSkip(f io.ReaderAt, size int64, log func(string)) (Result, []PageWrite, error) {
-	f = directReader(f, size)
+func planConsentSkip(f io.ReaderAt, size int64, log func(string)) (Result, []PageWrite, error) {
+	f = common.DirectReader(f, size)
 	t, err := Find(f, size)
 	if err != nil {
 		return Result{}, nil, err
@@ -194,25 +192,26 @@ func diffPages(before, mod []byte, base int64) []PageWrite {
 }
 
 // ApplyConsentSkip writes only after PlanConsentSkip finds exactly one handler match.
-func ApplyConsentSkip(f ReadWriterAt, size int64, log func(string)) (Result, error) {
-	dev := directReadWriter(f, size)
-	res, writes, err := PlanConsentSkip(dev, size, log)
+func applyConsentSkip(f patch.ReadWriterAt, size int64, log func(string)) error {
+	dev := common.DirectReadWriter(f, size)
+	res, writes, err := planConsentSkip(dev, size, log)
 	if err != nil {
-		return res, err
+		return err
 	}
 	original := make([]byte, res.Target.Size)
 	if err := readFullAt(dev, original, res.Target.Offset); err != nil {
-		return res, fmt.Errorf("cannot preserve the nav image: %w", err)
+		return fmt.Errorf("cannot preserve the nav image: %w", err)
 	}
 
 	// Payload first keeps the old MTCP lengths and checksums valid longest.
 	orderWrites(writes, res.Target.Offset+segOffset)
 	if err := applyAndVerify(dev, res.Target, original, writes); err != nil {
-		return res, err
+		return err
 	}
 	log(fmt.Sprintf("Wrote %d pages of 4 KiB", res.Pages))
 	log("Nav image sha256: " + res.SHA256)
-	return res, nil
+	log(fmt.Sprintf("Patched %s, chunk %d (%d -> %d bytes).", res.Target.Build, res.Chunk, res.Stock, res.Packed))
+	return nil
 }
 
 func orderWrites(writes []PageWrite, metadata int64) {
@@ -223,9 +222,7 @@ func orderWrites(writes []PageWrite, metadata int64) {
 	})
 }
 
-type syncer interface{ Sync() error }
-
-func applyAndVerify(f ReadWriterAt, target Target, original []byte, writes []PageWrite) error {
+func applyAndVerify(f patch.ReadWriterAt, target Target, original []byte, writes []PageWrite) error {
 	failure := func(cause error) error {
 		restoreErr := writeFullAt(f, original, target.Offset)
 		if restoreErr == nil {
@@ -242,7 +239,7 @@ func applyAndVerify(f ReadWriterAt, target Target, original []byte, writes []Pag
 			return failure(fmt.Errorf("cannot write at 0x%x: %w", w.Offset, err))
 		}
 	}
-	s, ok := f.(syncer)
+	s, ok := f.(common.Syncer)
 	if !ok {
 		return failure(fmt.Errorf("target does not support sync"))
 	}
@@ -261,8 +258,8 @@ func applyAndVerify(f ReadWriterAt, target Target, original []byte, writes []Pag
 	return nil
 }
 
-func syncAndVerify(f ReadWriterAt, off int64, want []byte) error {
-	s, ok := f.(syncer)
+func syncAndVerify(f patch.ReadWriterAt, off int64, want []byte) error {
+	s, ok := f.(common.Syncer)
 	if !ok {
 		return fmt.Errorf("target does not support sync")
 	}
@@ -465,4 +462,15 @@ func skipBody(d Derived) []uint32 {
 		0xe58d3000,
 		b(a+0x70, d.Tail),
 	}
+}
+
+// IMPL BasePatch
+
+//go:embed qy8preview.jpg
+var previewImg []byte
+
+var PatchImpl = &patch.Patch{
+	PatchName:  "Remove consent screen on QY8XXX (AZE0, ZE1, E-NV200) NOT FOR JAPAN!",
+	PatchImage: &previewImg,
+	Patcher:    applyConsentSkip,
 }

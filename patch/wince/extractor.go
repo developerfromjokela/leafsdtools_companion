@@ -291,9 +291,7 @@ func (f *File) WriteTo(w io.Writer) (int64, error) {
 	return int64(n), err
 }
 
-// ---------------------------------------------------------------------------
 // Modules
-// ---------------------------------------------------------------------------
 
 // Module is an executable or DLL stored in the ROM in split (e32/o32) form.
 type Module struct {
@@ -626,9 +624,7 @@ func (m *Module) buildO32Header(o O32Rom, usage *[len(segmentNames)]int) []byte 
 	return b
 }
 
-// ---------------------------------------------------------------------------
 // PE image writer
-// ---------------------------------------------------------------------------
 
 type imageWriter struct {
 	buf []byte

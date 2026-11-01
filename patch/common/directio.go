@@ -1,6 +1,7 @@
-package qy8consent
+package common
 
 import (
+	"LeafSDTools_Companion/patch"
 	"fmt"
 	"io"
 	"math"
@@ -9,26 +10,28 @@ import (
 
 const directAlign = 4096
 
+type Syncer interface{ Sync() error }
+
 type directAware interface{ DirectIO() bool }
 
 type alignedAt struct {
-	rw   ReadWriterAt
+	rw   patch.ReadWriterAt
 	size int64
 }
 
-func directReader(r io.ReaderAt, size int64) io.ReaderAt {
+func DirectReader(r io.ReaderAt, size int64) io.ReaderAt {
 	d, ok := r.(directAware)
 	if !ok || !d.DirectIO() {
 		return r
 	}
-	rw, ok := r.(ReadWriterAt)
+	rw, ok := r.(patch.ReadWriterAt)
 	if !ok {
 		return &alignedReaderAt{r: r, size: size}
 	}
 	return &alignedAt{rw: rw, size: size}
 }
 
-func directReadWriter(rw ReadWriterAt, size int64) ReadWriterAt {
+func DirectReadWriter(rw patch.ReadWriterAt, size int64) patch.ReadWriterAt {
 	d, ok := rw.(directAware)
 	if !ok || !d.DirectIO() {
 		return rw
@@ -73,7 +76,7 @@ func (a *alignedAt) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func (a *alignedAt) Sync() error {
-	s, ok := a.rw.(syncer)
+	s, ok := a.rw.(Syncer)
 	if !ok {
 		return fmt.Errorf("target does not support sync")
 	}

@@ -1,4 +1,4 @@
-package patches
+package agree_qy7
 
 import (
 	"LeafSDTools_Companion/patch/wince"
@@ -674,7 +674,7 @@ func RunPatch_AgreeQY7(nbKernel *[]byte) ([]byte, error) {
 		return nil, errors.New("cannot find SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")
 	}
 
-	// Patch event handler from SRT_COLD_I_AGREE_TELEMA to SRT_COLD_I_AGREE_TELEMA_OK_SELECTED
+	// Patch event handler ID from SRT_COLD_I_AGREE_TELEMA to SRT_COLD_I_AGREE_TELEMA_OK_SELECTED
 	coldAgreeTelemaOkSelectedVtableOffset := clsSrtColdIAgreeTelemaOkSelected.VtableVA - textSection.RealAddr
 
 	addrBytes := make([]byte, 4)
@@ -682,7 +682,7 @@ func RunPatch_AgreeQY7(nbKernel *[]byte) ([]byte, error) {
 
 	copy(textSectionPatched[coldAgreeTelemaOkSelectedVtableOffset+(vtEventListenerOffset*4):], addrBytes)
 
-	// Patch event handler accept ID from SK_SCT_AGREE_CLICK to SS_TMR_AGREE_TELEMA_OK_SELECTED
+	// Patch event handler ID from SK_SCT_AGREE_CLICK to SS_TMR_AGREE_TELEMA_OK_SELECTED
 	agreeClickCode := slices.Index(otherTable, "SS_TMR_AGREE_TELEMA_OK_SELECTED")
 	if agreeClickCode == -1 {
 		return nil, errors.New("could not find SS_TMR_AGREE_TELEMA_OK_SELECTED")
@@ -711,8 +711,8 @@ func RunPatch_AgreeQY7(nbKernel *[]byte) ([]byte, error) {
 		return nil, errors.New("twoSecAddr is 0")
 	}
 
-	_, init1Offset := GetTimerDelayPtrAddress(textSection, clsSrtColdIAgreeTelemaOkSelected.VtableContent[16], fiveSecAddr)
-	_, init2Offset := GetTimerDelayPtrAddress(textSection, clsSrtColdIAgreeTelemaOkSelected.VtableContent[18], fiveSecAddr)
+	_, init1Offset := GetTimerDelayPtrAddress(textSection, clsSrtColdIAgreeTelemaOkSelected.VtableContent[vtInit1Offset], fiveSecAddr)
+	_, init2Offset := GetTimerDelayPtrAddress(textSection, clsSrtColdIAgreeTelemaOkSelected.VtableContent[vtInit2Offset], fiveSecAddr)
 
 	if init1Offset == 0 || init2Offset == 0 {
 		return nil, errors.New(fmt.Sprintf("init offsets invalid, init1Offset %d, init2Offset %d", init1Offset, init2Offset))
@@ -724,7 +724,6 @@ func RunPatch_AgreeQY7(nbKernel *[]byte) ([]byte, error) {
 	copy(textSectionPatched[init2Offset:], twoSecondAddrBytes)
 
 	// Patch startup state machine processor to use SRT_COLD_I_AGREE_TELEMA_OK_SELECTED instead of SRT_COLD_I_AGREE_TELEMA
-
 	agreeTransitionCode := slices.Index(table, "SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")
 	if agreeTransitionCode == -1 {
 		return nil, errors.New("could not find SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")

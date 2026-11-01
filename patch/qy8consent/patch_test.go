@@ -1,6 +1,7 @@
 package qy8consent
 
 import (
+	"LeafSDTools_Companion/patch/common"
 	"bytes"
 	"crypto/sha256"
 	"encoding/binary"
@@ -228,7 +229,7 @@ type faultRWAt struct {
 
 func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%directAlign != 0 || len(p)%directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%directAlign != 0 {
+		if off%common.directAlign != 0 || len(p)%common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%common.directAlign != 0 {
 			return 0, fmt.Errorf("unaligned read")
 		}
 	}
@@ -237,7 +238,7 @@ func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 
 func (f *faultRWAt) WriteAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%directAlign != 0 || len(p)%directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%directAlign != 0 {
+		if off%common.directAlign != 0 || len(p)%common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%common.directAlign != 0 {
 			return 0, fmt.Errorf("unaligned write")
 		}
 	}
@@ -329,7 +330,7 @@ func TestDirectIOFindUsesAlignedRequests(t *testing.T) {
 func TestDirectIOApplyUsesAlignedRequests(t *testing.T) {
 	original := bytes.Repeat([]byte{0x31}, 3*pageSize)
 	f := &faultRWAt{b: bytes.Clone(original), direct: true}
-	dev := directReadWriter(f, int64(len(original)))
+	dev := common.directReadWriter(f, int64(len(original)))
 	want := bytes.Repeat([]byte{0x72}, 173)
 	writes := []PageWrite{{Offset: 123, Data: want}}
 	if err := applyAndVerify(dev, Target{Size: len(original)}, original, writes); err != nil {
@@ -356,17 +357,18 @@ func readFixture(t *testing.T, envVar string) []byte {
 	return data
 }
 
-func patchCopy(t *testing.T, data []byte) ([]byte, Result, error) {
+func patchCopy(t *testing.T, data []byte) ([]byte, error) {
 	t.Helper()
 	cp := bytes.Clone(data)
 	f := &memRWAt{cp}
-	res, err := ApplyConsentSkip(f, int64(len(cp)), func(s string) { t.Log(s) })
-	return cp, res, err
+
+	err := Qy8ConsentPathImpl.Patcher(f, int64(len(cp)), func(s string) { t.Log(s) })
+	return cp, err
 }
 
 func TestZE0MatchesTheReferencePatcher(t *testing.T) {
 	data := readFixture(t, "QY8_ZE0_MOD")
-	out, _, err := patchCopy(t, data)
+	out, err := patchCopy(t, data)
 	if err != nil {
 		t.Fatalf("ApplyConsentSkip: %v", err)
 	}
@@ -379,7 +381,7 @@ func TestZE0MatchesTheReferencePatcher(t *testing.T) {
 
 func TestME0MatchesTheKnownGoodHash(t *testing.T) {
 	data := readFixture(t, "QY8_ME0_MOD")
-	out, _, err := patchCopy(t, data)
+	out, err := patchCopy(t, data)
 	if err != nil {
 		t.Fatalf("ApplyConsentSkip: %v", err)
 	}
@@ -391,7 +393,7 @@ func TestME0MatchesTheKnownGoodHash(t *testing.T) {
 
 func TestZE1AlreadyPatchedIsLeftAlone(t *testing.T) {
 	data := readFixture(t, "QY8_ZE1_PATCHED_MOD")
-	out, _, err := patchCopy(t, data)
+	out, err := patchCopy(t, data)
 	if err == nil {
 		t.Fatal("patched an image this package should recognise as already done")
 	}
