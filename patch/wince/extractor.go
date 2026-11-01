@@ -65,6 +65,10 @@ type Extractor struct {
 	Modules []*Module
 	// Files are the plain files found in the ROM.
 	Files []*File
+	// Start is the offset of the ROM image within the buffer that was passed
+	// to NewExtractor/NewExtractorAt. Offsets returned by Offset are relative
+	// to Start.
+	Start int
 }
 
 // NewExtractor scans image for the Windows CE ROM signature and analyzes the
@@ -74,7 +78,12 @@ func NewExtractor(image []byte) (*Extractor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return analyze(image[start:])
+	e, err := analyze(image[start:])
+	if err != nil {
+		return nil, err
+	}
+	e.Start = start
+	return e, nil
 }
 
 // NewExtractorAt analyzes the ROM that starts at the given offset of image,
@@ -83,7 +92,20 @@ func NewExtractorAt(image []byte, offset int) (*Extractor, error) {
 	if offset < 0 || offset > len(image) {
 		return nil, ErrOutOfRange
 	}
-	return analyze(image[offset:])
+	e, err := analyze(image[offset:])
+	if err != nil {
+		return nil, err
+	}
+	e.Start = offset
+	return e, nil
+}
+
+// Offset converts a virtual address stored in the ROM (e.g. a module's
+// DataPtr or Toc.E32Offset) into an offset relative to Start. The result is
+// not range-checked; add Start to index the original buffer and check bounds
+// before use.
+func (e *Extractor) Offset(va uint32) int64 {
+	return e.minusLoadOffset(va)
 }
 
 // findImageStart returns the offset of the start of the ROM image: the
@@ -181,6 +203,7 @@ func (e *Extractor) u32(off int64) (uint32, error) {
 	return le.Uint32(b), nil
 }
 
+// minusLoadOffset converts an address stored in the ROM to an image offset.
 func (e *Extractor) minusLoadOffset(addr uint32) int64 {
 	return int64(addr) - e.loadOffset
 }
@@ -358,6 +381,54 @@ func (m *Module) Image() ([]byte, error) {
 	w.putU32(e32Ofs+0x54, uint32(headerSize)) // e32_hdrsize
 
 	return w.buf, nil
+}
+
+// Sections Returns all program sections
+func (m *Module) Sections() ([]Section, error) {
+	secs := make([]Section, 0, len(m.O32s))
+	var usage [len(segmentNames)]int
+
+	for i, o := range m.O32s {
+		kind := m.segmentKind(o)
+		name := segmentNames[kind]
+		if usage[kind] != 0 {
+			name += fmt.Sprint(usage[kind])
+		}
+		usage[kind]++
+
+		compressed := o.Flags&imageScnCompressed != 0
+		off := m.ext.minusLoadOffset(o.DataPtr)
+		data, err := m.ext.extractData(off, int64(min(o.VSize, o.PSize)), compressed, int64(o.VSize))
+		if err != nil {
+			return nil, fmt.Errorf("%s: section %d (%s): %w", m.Name, i, name, err)
+		}
+		secs = append(secs, Section{
+			Index:       i,
+			Name:        name,
+			O32Rom:      o,
+			Compressed:  compressed,
+			ImageOffset: off,
+			Data:        data,
+		})
+	}
+	return secs, nil
+}
+
+func (m *Module) segmentKind(o O32Rom) int {
+	switch {
+	case m.E32.Unit[unitRES].RVA == o.RVA && m.E32.Unit[unitRES].Size == o.VSize:
+		return segRsrc
+	case m.E32.Unit[unitEXC].RVA == o.RVA && m.E32.Unit[unitEXC].Size == o.VSize:
+		return segPData
+	case o.Flags&imageScnCntCode != 0:
+		return segText
+	case o.Flags&imageScnCntInitializedData != 0:
+		return segData
+	case o.Flags&imageScnCntUninitializedData != 0:
+		return segPData
+	default:
+		return segOther
+	}
 }
 
 func (m *Module) sumSegmentSizes(flag uint32) uint32 {

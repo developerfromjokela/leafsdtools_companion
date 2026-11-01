@@ -124,6 +124,15 @@ type FileEntry struct {
 	LoadOffset     uint32
 }
 
+type Section struct {
+	Index int
+	Name  string
+	O32Rom
+	Compressed  bool
+	ImageOffset int64
+	Data        []byte
+}
+
 // The parse* functions require len(b) >= the respective structure size; the
 // caller guarantees that via Extractor.slice.
 

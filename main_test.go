@@ -1,11 +1,14 @@
 package main
 
 import (
+	"LeafSDTools_Companion/patch/patches"
 	"LeafSDTools_Companion/patch/wince"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -279,4 +282,183 @@ func TestWinCEKernelUtility(t *testing.T) {
 		fmt.Printf("   %+v\n", m.Toc.FileTime.Unix())
 		fmt.Println("  ", m.Toc.FileSize)
 	}
+}
+
+func TestWinCEKernelUtilityPatching(t *testing.T) {
+	imageFile := "../Documents/EliminateOk/NB01.nb0"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	var ex *wince.Extractor
+	ex, err = wince.NewExtractor(image)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to analyze %s: %v\n", imageFile, err)
+		return
+	}
+
+	var module *wince.Module = nil
+
+	for _, m := range ex.Modules {
+		if m.Name == "ScreenStateCC.dll" {
+			module = m
+			break
+		}
+	}
+
+	if module == nil {
+		fmt.Fprintf(os.Stderr, "Cannot find ScreenStateCC.dll\n")
+		return
+	}
+
+	fmt.Println(module.Toc.FileSize)
+
+	sections, err := module.Sections()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get sections: %v\n", err)
+		return
+	}
+
+	dllBytes, err := module.Image()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to retrieve image %s: %v\n", imageFile, err)
+		return
+	}
+
+	err = os.WriteFile("ScreenStateCC.dll", dllBytes, 0644)
+	if err != nil {
+		return
+	}
+
+	table, otherTable, err := patches.ExtractAllStateTables(dllBytes, &sections)
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to extract state table: %v\n", err)
+		return
+	}
+
+	fmt.Println(len(table))
+	fmt.Println(len(otherTable))
+
+	inits, err := patches.FindClassInitializers(sections, 0x54, 26)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to get state classes: %v\n", err)
+		return
+	}
+	var clsSrtColdIAgreeTelemaOkSelected *patches.ClassInitializer = nil
+	var clsSrtColdIAgreeTelema *patches.ClassInitializer = nil
+
+	for _, c := range inits {
+		fmt.Printf("init=%08x vtable=%08x getMainState=%08x id=%#04x (has=%v)",
+			c.FuncVA, c.VtableVA, c.GetMainStateVA, c.ID, c.HasID)
+		if c.ID > 0 {
+			fmt.Printf(" name=%s", table[c.ID])
+			if table[c.ID] == "SRT_COLD_I_AGREE_TELEMA" {
+				clsSrtColdIAgreeTelema = &c
+			} else if table[c.ID] == "SRT_COLD_I_AGREE_TELEMA_OK_SELECTED" {
+				clsSrtColdIAgreeTelemaOkSelected = &c
+			}
+		}
+		fmt.Println()
+	}
+
+	if clsSrtColdIAgreeTelema == nil {
+		fmt.Println("SRT_COLD_I_AGREE_TELEMA not found")
+		return
+
+	}
+
+	if clsSrtColdIAgreeTelemaOkSelected == nil {
+		fmt.Println("SRT_COLD_I_AGREE_TELEMA_OK_SELECTED not found")
+		return
+	}
+
+	var textSection *wince.Section = nil
+
+	for _, section := range sections {
+		if section.Name == ".text" {
+			textSection = &section
+		}
+	}
+
+	if textSection == nil {
+		fmt.Fprintf(os.Stderr, "Cannot find .text section\n")
+		return
+	}
+
+	fmt.Printf("SRT_COLD_I_AGREE_TELEMA             eventListener=%#04x init1=%#04x init2=%#04x\n", clsSrtColdIAgreeTelema.VtableContent[21],
+		clsSrtColdIAgreeTelema.VtableContent[16], clsSrtColdIAgreeTelema.VtableContent[18])
+	fmt.Printf("SRT_COLD_I_AGREE_TELEMA_OK_SELECTED eventListener=%#04x init1=%#04x init2=%#04x\n", clsSrtColdIAgreeTelemaOkSelected.VtableContent[21],
+		clsSrtColdIAgreeTelemaOkSelected.VtableContent[16], clsSrtColdIAgreeTelemaOkSelected.VtableContent[18])
+
+	textoffset := clsSrtColdIAgreeTelemaOkSelected.VtableContent[18] - (*textSection).RealAddr
+	fmt.Printf("SRT_COLD_I_AGREE_TELEMA_OK_SELECTED init1 ins1 %#02x %#02x\n", (*textSection).Data[textoffset], (*textSection).Data[textoffset+1])
+
+	fiveSecAddr, _ := patches.GetTimer5SecDataAddr(textSection)
+	twoSecAddr, _ := patches.GetTimer2SecDataAddr(textSection)
+
+	if fiveSecAddr == 0 {
+		fmt.Println("fiveSecAddr is 0")
+		return
+	}
+
+	addrBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(addrBytes, fiveSecAddr)
+
+	maxCap := int(textoffset + 400)
+	if maxCap > len((*textSection).Data) {
+		maxCap = len((*textSection).Data)
+	}
+
+	for from := int(textoffset); from < maxCap; {
+		i := bytes.Index((*textSection).Data[from:], addrBytes)
+		if i < 0 {
+			break
+		}
+		va := (*textSection).RealAddr + uint32(from+i)
+		fmt.Printf("FOUND %#04x %d\n", va, i)
+		fmt.Printf("Replace content with %#04x\n", twoSecAddr)
+		break
+	}
+
+	textoffset = clsSrtColdIAgreeTelema.VtableContent[21] - (*textSection).RealAddr
+
+	addrBytes = []byte{0x0b, 0x00, 0xf6, 0x68, 0xff, 0xff} // FFFF replaced with SK_SCT_AGREE_CLICK
+	agreeClickCode := slices.Index(otherTable, "SK_SCT_AGREE_CLICK")
+	if agreeClickCode == -1 {
+		fmt.Println("SK_SCT_AGREE_CLICK not found")
+		return
+	}
+
+	fmt.Printf("SK_SCT_AGREE_CLICK IDX %#08x\n", uint16(agreeClickCode))
+
+	binary.LittleEndian.PutUint16(addrBytes[4:], uint16(agreeClickCode))
+
+	fmt.Printf("SCH %#16x\n", addrBytes)
+
+	maxCap = int(textoffset + 400)
+	if maxCap > len((*textSection).Data) {
+		maxCap = len((*textSection).Data)
+	}
+
+	for from := int(textoffset); from < maxCap; {
+		i := bytes.Index((*textSection).Data[from:], addrBytes)
+		if i < 0 {
+			break
+		}
+		va := (*textSection).RealAddr + uint32(from+i)
+		fmt.Printf("FOUND %#04x %d\n", va+4, i)
+		break
+	}
+
+	//
+
 }
