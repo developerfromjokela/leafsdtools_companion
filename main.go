@@ -2,6 +2,7 @@ package main
 
 import (
 	"LeafSDTools_Companion/disk"
+	"LeafSDTools_Companion/patch/qy8consent"
 	"LeafSDTools_Companion/privilege"
 	"LeafSDTools_Companion/utils"
 	"bytes"
@@ -216,6 +217,166 @@ func fixPartitionTable(path string, isDevice bool) {
 
 	logAppend("Done. Hidden system partitions should now be visible after re-insert / remount.")
 	logAppend("────────────────────────────────────────")
+}
+
+// applyConsentPatch runs the QY8 consent-skip patch, open/lock/log flow shared with fixPartitionTable.
+func applyConsentPatch(path string, isDevice bool) {
+	logAppend("\n────────────────────────────────────────")
+	var hold disk.VolumeHold
+	if isDevice {
+		logAppend(fmt.Sprintf("Target device: %s", path))
+		logAppend("Locking/unmounting volumes..")
+		var herr error
+		hold, herr = disk.HoldDeviceVolumes(path)
+		if herr != nil {
+			logAppend("Could not reserve device " + herr.Error())
+			return
+		} else if hold != nil {
+			defer hold.Close()
+		}
+	} else {
+		logAppend(fmt.Sprintf("Target image: %s", path))
+	}
+
+	rw, size, err := disk.OpenDeviceForReadWrite(path)
+	if err != nil {
+		logAppend(fmt.Sprintf("Cannot open for read/write: %v", err))
+		return
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = rw.Close()
+		}
+	}()
+
+	f, ok := rw.(qy8consent.ReadWriterAt)
+	if !ok {
+		logAppend("Opened target does not support random access")
+		return
+	}
+
+	res, err := qy8consent.ApplyConsentSkip(f, size, logAppend)
+	if err != nil {
+		logAppend(fmt.Sprintf("Patch not applied: %v", err))
+		logAppend("────────────────────────────────────────")
+		return
+	}
+	if err := rw.Close(); err != nil {
+		closed = true
+		logAppend(fmt.Sprintf("Patch not applied: closing target: %v", err))
+		logAppend("────────────────────────────────────────")
+		return
+	}
+	closed = true
+	logAppend(fmt.Sprintf("Patched %s, chunk %d (%d -> %d bytes).", res.Target.Build, res.Chunk, res.Stock, res.Packed))
+	logAppend("────────────────────────────────────────")
+}
+
+func buildPatchTab() fyne.CanvasObject {
+	status := widget.NewLabel("Choose a target, then apply the patch.")
+	status.Wrapping = fyne.TextWrapWord
+
+	var imagePath string
+	var selectedDevice disk.Device
+	deviceByLabel := map[string]disk.Device{}
+
+	imageLabel := widget.NewLabel("No image selected")
+	imageLabel.Wrapping = fyne.TextWrapWord
+
+	deviceSelect := widget.NewSelect(nil, nil)
+	deviceSelect.PlaceHolder = "Select device..."
+	deviceSelect.Hide()
+
+	refreshDevices := func() {
+		list, err := disk.ListDevices()
+		if err != nil {
+			logAppend("Failed to list devices: " + err.Error())
+			return
+		}
+		deviceByLabel = map[string]disk.Device{}
+		opts := make([]string, len(list))
+		for i, d := range list {
+			opts[i] = d.String()
+			deviceByLabel[d.String()] = d
+		}
+		deviceSelect.Options = opts
+		deviceSelect.ClearSelected()
+		deviceSelect.Refresh()
+	}
+
+	chooseImageBtn := widget.NewButton("Choose .img file...", func() {
+		filename, err := filedialog.File().Filter("Disk Image", "img").Load()
+		if err != nil {
+			logAppend("Open dialog error: " + err.Error())
+			return
+		}
+		if filename == "" {
+			return
+		}
+		imagePath = filename
+		imageLabel.SetText(filepath.Base(filename))
+	})
+
+	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), refreshDevices)
+	refreshBtn.Hide()
+
+	deviceRow := container.NewBorder(nil, nil, nil, refreshBtn, deviceSelect)
+	deviceRow.Hide()
+
+	modeRadio := widget.NewRadioGroup([]string{"Disk image (.img)", "Physical device"}, func(s string) {
+		switch s {
+		case "Disk image (.img)":
+			chooseImageBtn.Show()
+			imageLabel.Show()
+			deviceRow.Hide()
+			deviceSelect.Hide()
+			refreshBtn.Hide()
+		case "Physical device":
+			chooseImageBtn.Hide()
+			imageLabel.Hide()
+			deviceRow.Show()
+			deviceSelect.Show()
+			refreshBtn.Show()
+			refreshDevices()
+		}
+	})
+	modeRadio.SetSelected("Disk image (.img)")
+	modeRadio.Horizontal = true
+
+	applyBtn := widget.NewButton("Apply consent-skip patch", func() {
+		if modeRadio.Selected == "Physical device" {
+			d, ok := deviceByLabel[deviceSelect.Selected]
+			if !ok {
+				logAppend("Please select a device first.")
+				return
+			}
+			selectedDevice = d
+			status.SetText("Device: " + d.String())
+			go applyConsentPatch(selectedDevice.Path, true)
+			return
+		}
+		if imagePath == "" {
+			logAppend("Please choose an image file first.")
+			return
+		}
+		status.SetText("Image: " + filepath.Base(imagePath))
+		go applyConsentPatch(imagePath, false)
+	})
+	applyBtn.Importance = widget.HighImportance
+
+	return container.NewVBox(
+		widget.NewLabelWithStyle("Patches", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabel("Skips the telematics consent screen (QY8 ZE0/ZE1/ME0). Backup first."),
+		widget.NewSeparator(),
+		modeRadio,
+		chooseImageBtn,
+		imageLabel,
+		deviceRow,
+		layout.NewSpacer(),
+		status,
+		applyBtn,
+	)
 }
 
 func buildFixTab() fyne.CanvasObject {
@@ -609,10 +770,7 @@ func main() {
 		container.NewTabItem("Fix partitions", buildFixTab()),
 		container.NewTabItem("Backup", buildBackupTab()),
 		container.NewTabItem("Restore", buildRestoreTab()),
-		container.NewTabItem("Patches", container.NewVBox(
-			widget.NewLabelWithStyle("Patches", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-			widget.NewLabel("TODO — not ready yet"),
-		)),
+		container.NewTabItem("Patches", buildPatchTab()),
 	)
 
 	mainContent := container.NewBorder(tabs, nil, nil, nil, logEntry)
