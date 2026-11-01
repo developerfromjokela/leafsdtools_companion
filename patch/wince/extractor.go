@@ -57,7 +57,9 @@ var (
 type Extractor struct {
 	data         []byte
 	romHdrOffset int64
-	loadOffset   int64
+	// LoadOffset converts a load address (as stored in a TOC/E32/O32 entry)
+	// into a byte offset within data: fileOffset = addr - LoadOffset.
+	LoadOffset int64
 
 	// RomHdr is the parsed ROM header.
 	RomHdr RomHdr
@@ -119,7 +121,7 @@ func analyze(data []byte) (*Extractor, error) {
 		return nil, err
 	}
 	e.romHdrOffset = int64(romHdrOff)
-	e.loadOffset = int64(loadBase) - e.romHdrOffset
+	e.LoadOffset = int64(loadBase) - e.romHdrOffset
 
 	b, err := e.slice(e.romHdrOffset, romHdrSize)
 	if err != nil {
@@ -182,7 +184,7 @@ func (e *Extractor) u32(off int64) (uint32, error) {
 }
 
 func (e *Extractor) minusLoadOffset(addr uint32) int64 {
-	return int64(addr) - e.loadOffset
+	return int64(addr) - e.LoadOffset
 }
 
 // cString reads a NUL-terminated ASCII string at off.
