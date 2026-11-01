@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 )
 
 const (
@@ -49,6 +51,9 @@ var (
 	ErrDecompressionFailed = errors.New("wince: decompression failed")
 	ErrTooLarge            = errors.New("wince: size exceeds configured limit")
 	ErrBadName             = errors.New("wince: invalid entry name")
+	ErrNotFound            = errors.New("wince: not found")
+	ErrSizeMismatch        = errors.New("wince: replacement size differs from stored section size")
+	ErrCompressedSection   = errors.New("wince: section is compressed; in-place replacement not supported")
 )
 
 // Extractor extracts information and files from a Windows CE ROM image.
@@ -69,6 +74,7 @@ type Extractor struct {
 	// to NewExtractor/NewExtractorAt. Offsets returned by Offset are relative
 	// to Start.
 	Start int
+	image []byte
 }
 
 // NewExtractor scans image for the Windows CE ROM signature and analyzes the
@@ -83,6 +89,7 @@ func NewExtractor(image []byte) (*Extractor, error) {
 		return nil, err
 	}
 	e.Start = start
+	e.image = image
 	return e, nil
 }
 
@@ -412,6 +419,89 @@ func (m *Module) Sections() ([]Section, error) {
 		})
 	}
 	return secs, nil
+}
+
+// Module finds a module by name (case-insensitive).
+func (e *Extractor) Module(name string) (*Module, bool) {
+	for _, m := range e.Modules {
+		if strings.EqualFold(m.Name, name) {
+			return m, true
+		}
+	}
+	return nil, false
+}
+
+// Bytes returns the whole WinCE image buffer, including any modifications made.
+func (e *Extractor) Bytes() []byte { return e.image }
+
+// WriteImage writes the whole WinCE image to w.
+func (e *Extractor) WriteImage(w io.Writer) (int64, error) {
+	n, err := w.Write(e.image)
+	return int64(n), err
+}
+
+// SaveImage writes the whole WinCE image to a file.
+func (e *Extractor) SaveImage(path string) error {
+	return os.WriteFile(path, e.image, 0o644)
+}
+
+// sectionNames returns the PE-style names that Sections() assigns.
+func (m *Module) sectionNames() []string {
+	names := make([]string, len(m.O32s))
+	var usage [len(segmentNames)]int
+	for i, o := range m.O32s {
+		k := m.segmentKind(o)
+		n := segmentNames[k]
+		if usage[k] != 0 {
+			n += fmt.Sprint(usage[k])
+		}
+		usage[k]++
+		names[i] = n
+	}
+	return names
+}
+
+// SectionIndex returns the index of the section with the given name (".text", ".data1", ...).
+func (m *Module) SectionIndex(name string) (int, bool) {
+	for i, n := range m.sectionNames() {
+		if strings.EqualFold(n, name) {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// ReplaceSection overwrites the stored bytes of section index with data, in
+// place. data must have exactly the stored length (min(VSize, PSize)) and the
+// section must not be compressed. Nothing else in the image is modified.
+func (m *Module) ReplaceSection(index int, data []byte) error {
+	if index < 0 || index >= len(m.O32s) {
+		return ErrOutOfRange
+	}
+	o := m.O32s[index]
+	stored := int64(min(o.VSize, o.PSize))
+	if o.Flags&imageScnCompressed != 0 && stored != int64(o.VSize) {
+		return fmt.Errorf("%s: section %d: %w", m.Name, index, ErrCompressedSection)
+	}
+	if int64(len(data)) != stored {
+		return fmt.Errorf("%s: section %d: %w: got %d bytes, section stores %d",
+			m.Name, index, ErrSizeMismatch, len(data), stored)
+	}
+	dst, err := m.ext.slice(m.ext.minusLoadOffset(o.DataPtr), stored)
+	if err != nil {
+		return fmt.Errorf("%s: section %d: %w", m.Name, index, err)
+	}
+	copy(dst, data)
+	return nil
+}
+
+// ReplaceSectionByName is ReplaceSection addressed by section name.
+func (m *Module) ReplaceSectionByName(name string, data []byte) error {
+	i, ok := m.SectionIndex(name)
+	if !ok {
+		return fmt.Errorf("%s: section %q: %w", m.Name, name, ErrNotFound)
+	}
+	return m.ReplaceSection(i, data)
 }
 
 func (m *Module) segmentKind(o O32Rom) int {

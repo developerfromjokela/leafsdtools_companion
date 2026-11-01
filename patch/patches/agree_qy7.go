@@ -409,12 +409,11 @@ func ExtractAllStateTables(binaryData []byte, sections *[]wince.Section) ([]stri
 	res, err := ScreenStateDebuggerAnalysis(binaryData)
 	if err != nil {
 		fmt.Println("screen states error:", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("screen states error: %w", err)
 	}
 	otherRes, err := OtherStatesAnalysis(binaryData)
 	if err != nil {
-		fmt.Println("other states error:", err)
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("other states error:", err)
 	}
 
 	var textSection *wince.Section = nil
@@ -559,10 +558,10 @@ func GetSCTAgreeClickCodeAddress(textSection *wince.Section, otherStatesTable *[
 	return 0, 0, errors.New("could not find at eventHandlerAddress")
 }
 
-func FindTransitionActuatorFunctionTransitionIDAddr1(textSection *wince.Section, otherStatesTable *[]string) (uint32, uint32, error) {
+func FindTransitionActuatorFunctionTransitionIDAddr1(textSection *wince.Section, statesTable *[]string) (uint32, uint32, error) {
 
 	addrBytes := []byte{0x1f, 0xa0, 0x09, 0x00, 0xff, 0xff} // FFFF replaced with TRANSITION_AGREE_TELEMA_STARTING
-	agreeClickCode := slices.Index(*otherStatesTable, "TRANSITION_AGREE_TELEMA_STARTING")
+	agreeClickCode := slices.Index(*statesTable, "TRANSITION_AGREE_TELEMA_STARTING")
 	if agreeClickCode == -1 {
 		return 0, 0, errors.New("could not find TRANSITION_AGREE_TELEMA_STARTING")
 	}
@@ -580,9 +579,9 @@ func FindTransitionActuatorFunctionTransitionIDAddr1(textSection *wince.Section,
 	return 0, 0, errors.New("could not find transition actuator function")
 }
 
-func FindTransitionActuatorFunctionTransitionIDAddr2(textSection *wince.Section, otherStatesTable *[]string) (uint32, uint32, error) {
+func FindTransitionActuatorFunctionTransitionIDAddr2(textSection *wince.Section, statesTable *[]string) (uint32, uint32, error) {
 	addrBytes := []byte{0x0a, 0xa0, 0x09, 0x00, 0xff, 0xff} // FFFF replaced with SRT_COLD_I_AGREE_TELEMA
-	agreeClickCode := slices.Index(*otherStatesTable, "SRT_COLD_I_AGREE_TELEMA")
+	agreeClickCode := slices.Index(*statesTable, "SRT_COLD_I_AGREE_TELEMA")
 	if agreeClickCode == -1 {
 		return 0, 0, errors.New("could not find SRT_COLD_I_AGREE_TELEMA")
 	}
@@ -600,7 +599,7 @@ func FindTransitionActuatorFunctionTransitionIDAddr2(textSection *wince.Section,
 	return 0, 0, errors.New("could not find transition actuator function")
 }
 
-func RunPatch(nbKernel *[]byte) ([]byte, error) {
+func RunPatch_AgreeQY7(nbKernel *[]byte) ([]byte, error) {
 	var ex *wince.Extractor
 	ex, err := wince.NewExtractor(*nbKernel)
 	if err != nil {
@@ -658,17 +657,13 @@ func RunPatch(nbKernel *[]byte) ([]byte, error) {
 	var clsSrtColdIAgreeTelema *ClassInitializer = nil
 
 	for _, c := range inits {
-		fmt.Printf("init=%08x vtable=%08x getMainState=%08x id=%#04x (has=%v)",
-			c.FuncVA, c.VtableVA, c.GetMainStateVA, c.ID, c.HasID)
 		if c.ID > 0 {
-			fmt.Printf(" name=%s", table[c.ID])
 			if table[c.ID] == "SRT_COLD_I_AGREE_TELEMA" {
 				clsSrtColdIAgreeTelema = &c
 			} else if table[c.ID] == "SRT_COLD_I_AGREE_TELEMA_OK_SELECTED" {
 				clsSrtColdIAgreeTelemaOkSelected = &c
 			}
 		}
-		fmt.Println()
 	}
 
 	if clsSrtColdIAgreeTelema == nil {
@@ -680,23 +675,22 @@ func RunPatch(nbKernel *[]byte) ([]byte, error) {
 	}
 
 	// Patch event handler from SRT_COLD_I_AGREE_TELEMA to SRT_COLD_I_AGREE_TELEMA_OK_SELECTED
-	coldAgreeTelemaVtableOffset := clsSrtColdIAgreeTelema.VtableVA - textSection.RealAddr
+	coldAgreeTelemaOkSelectedVtableOffset := clsSrtColdIAgreeTelemaOkSelected.VtableVA - textSection.RealAddr
 
 	addrBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(addrBytes, clsSrtColdIAgreeTelema.VtableContent[vtEventListenerOffset])
 
-	copy(textSectionPatched[coldAgreeTelemaVtableOffset+(vtEventListenerOffset*4):], addrBytes)
+	copy(textSectionPatched[coldAgreeTelemaOkSelectedVtableOffset+(vtEventListenerOffset*4):], addrBytes)
 
-	// Patch event handler accept ID from SK_SCT_AGREE_CLICK to SS_TMR_AGREE_OK_SELECTED
-
-	agreeClickCode := slices.Index(otherTable, "SS_TMR_AGREE_OK_SELECTED")
+	// Patch event handler accept ID from SK_SCT_AGREE_CLICK to SS_TMR_AGREE_TELEMA_OK_SELECTED
+	agreeClickCode := slices.Index(otherTable, "SS_TMR_AGREE_TELEMA_OK_SELECTED")
 	if agreeClickCode == -1 {
-		return nil, errors.New("could not find SS_TMR_AGREE_OK_SELECTED")
+		return nil, errors.New("could not find SS_TMR_AGREE_TELEMA_OK_SELECTED")
 	}
 
 	_, sctOffset, err := GetSCTAgreeClickCodeAddress(textSection, &otherTable, clsSrtColdIAgreeTelema.VtableContent[vtEventListenerOffset])
 
-	if err == nil {
+	if err != nil {
 		return nil, err
 	}
 
@@ -731,23 +725,29 @@ func RunPatch(nbKernel *[]byte) ([]byte, error) {
 
 	// Patch startup state machine processor to use SRT_COLD_I_AGREE_TELEMA_OK_SELECTED instead of SRT_COLD_I_AGREE_TELEMA
 
-	agreeTransitionCode := slices.Index(otherTable, "SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")
+	agreeTransitionCode := slices.Index(table, "SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")
 	if agreeTransitionCode == -1 {
 		return nil, errors.New("could not find SRT_COLD_I_AGREE_TELEMA_OK_SELECTED")
 	}
 
-	_, transitionAddr1, err := FindTransitionActuatorFunctionTransitionIDAddr1(textSection, &otherTable)
-	_, transitionAddr2, err := FindTransitionActuatorFunctionTransitionIDAddr2(textSection, &otherTable)
-
-	if err == nil {
+	_, transitionOffset1, err := FindTransitionActuatorFunctionTransitionIDAddr1(textSection, &otherTable)
+	if err != nil {
+		return nil, err
+	}
+	_, transitionOffset2, err := FindTransitionActuatorFunctionTransitionIDAddr2(textSection, &table)
+	if err != nil {
 		return nil, err
 	}
 
 	transitionIdBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(transitionIdBytes, uint16(agreeTransitionCode))
-	copy(textSectionPatched[transitionAddr1:], actionIdBytes)
-	copy(textSectionPatched[transitionAddr2:], actionIdBytes)
+	copy(textSectionPatched[transitionOffset1:], transitionIdBytes)
+	copy(textSectionPatched[transitionOffset2:], transitionIdBytes)
 
 	// Pack .text back to ROM
-
+	err = module.ReplaceSectionByName(".text", textSectionPatched)
+	if err != nil {
+		return nil, err
+	}
+	return ex.Bytes(), nil
 }
