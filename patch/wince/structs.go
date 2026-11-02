@@ -55,6 +55,8 @@ type Info struct {
 	Size uint32
 }
 
+type span struct{ lo, hi int64 }
+
 type E32Rom struct {
 	ObjCnt      uint16
 	ImageFlags  uint16
