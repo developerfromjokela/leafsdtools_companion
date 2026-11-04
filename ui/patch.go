@@ -3,7 +3,10 @@ package ui
 import (
 	"LeafSDTools_Companion/disk"
 	"LeafSDTools_Companion/patch"
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"path/filepath"
 
 	"fyne.io/fyne/v2"
@@ -33,6 +36,27 @@ func applyPatch(path string, isDevice bool, chosenPatch *patch.Patch) {
 		}
 	} else {
 		LogAppend(fmt.Sprintf("Target image: %s", path))
+	}
+
+	if chosenPatch.MediaType == patch.MediaTypeNAND {
+		in, err := os.Open(path)
+		if err != nil {
+			LogAppend("Backup failed: " + err.Error())
+			return
+		}
+		out, err := os.OpenFile(path+".backup", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err == nil {
+			_, err = io.Copy(out, in)
+			if cerr := out.Close(); err == nil {
+				err = cerr
+			}
+		}
+		in.Close()
+		if err != nil {
+			LogAppend("Backup failed: " + err.Error())
+			return
+		}
+		LogAppend("Backup saved: " + path + ".backup")
 	}
 
 	rw, size, err := disk.OpenDeviceForReadWrite(path)
@@ -153,6 +177,10 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 	}
 
 	chooseImageBtn = widget.NewButton("Choose .img file...", func() {
+		if selectedPatch == nil {
+			dialog.NewError(errors.New("Please select a patch first!"), *window).Show()
+			return
+		}
 		var mediaTypeDesc = "DiskImage"
 		var mediaTypeExtension = "DiskImage"
 		if selectedPatch.MediaType == patch.MediaTypeNAND {
@@ -225,10 +253,14 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 			target = imagePath
 			statusText = "File: " + filepath.Base(imagePath)
 		}
-
-		msg := widget.NewLabel(
-			"Patching modifies the original data and cannot be undone.\n\n" +
-				"Before continuing, make sure you have a full backup of your original SD card or NAND.\n\nFor SD, use Backup tab. For NAND, make a duplicate file of nand_xx.bin as a backup.")
+		var msg *widget.Label
+		if selectedPatch.MediaType == patch.MediaTypeNAND {
+			msg = widget.NewLabel("A backup will be created in same folder as your nand_xx.bin file, it will be named nand_xx.bin.backup. Please copy it somewhere safe, in case something goes wrong!")
+		} else {
+			msg = widget.NewLabel(
+				"Patching modifies the original data and cannot be undone.\n\n" +
+					"Before continuing, make sure you have a full backup of your original SD card or NAND.\n\nFor SD, use Backup tab. For NAND, make a duplicate file of nand_xx.bin as a backup.")
+		}
 		msg.Wrapping = fyne.TextWrapWord
 
 		d := dialog.NewCustomConfirm(

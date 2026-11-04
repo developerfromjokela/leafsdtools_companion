@@ -2,7 +2,7 @@
 Icon = "./Icon.png"
 Name = "leafsdtools_companion"
 ID = "leafsdtools_companion"
-Version = "1.1"
+Version = "1.2.1"
 Build = 1
 
 [Migrations]

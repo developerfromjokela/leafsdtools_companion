@@ -53,7 +53,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 		return err
 	}
 
-	log(fmt.Sprintf("NB04"))
+	log(fmt.Sprintf("\nNB04"))
 	log(fmt.Sprintf("--%s", customECECHDR.RomFileName))
 	log(fmt.Sprintf("--ROM SIZE %#04x, %d", customECECHDR.RomSize, customECECHDR.RomSize))
 	log(fmt.Sprintf("--VERSION %s", customECECHDR.VersionString))
@@ -77,7 +77,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 
 	log(fmt.Sprintf("ADD FILE (NAME=%s, REALSIZE=%d, COMPSIZE=%d)", fileResult.Name, fileResult.Entry.RealFileSize, fileResult.Entry.CompFileSize))
 
-	log(fmt.Sprintf("PATCHED ROM"))
+	log(fmt.Sprintf("\nPATCHED ROM"))
 	sum4, sum2, err := patcher_common.FixCustomECECChecksums(patchedRom)
 	if err != nil {
 		return err
