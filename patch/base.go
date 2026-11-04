@@ -12,11 +12,17 @@ type ReadWriterAt interface {
 
 type PatcherFunc func(f ReadWriterAt, size int64, log func(string)) error
 
+const (
+	MediaTypeSD   int = 0
+	MediaTypeNAND int = 1
+)
+
 // Patch Stub
 type Patch struct {
 	PatchName  string
 	PatchImage *[]byte
 	Patcher    PatcherFunc
+	MediaType  int
 }
 
 var ErrNotImplemented = errors.New("patch: Patcher not implemented")

@@ -16,7 +16,7 @@ const (
 // IMPL BasePatch
 
 func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
-	dev := common.DirectReadWriter(f, size)
+	dev := patcher_common.DirectReadWriter(f, size)
 	nb00Header := make([]byte, 512)
 	nb01Header := make([]byte, 512)
 	nBytes, err := dev.ReadAt(nb00Header, nb00Offset)
@@ -34,12 +34,12 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 		return errors.New("ReadAt failed to read enough bytes")
 	}
 
-	nkOk00Parse, _, err := ParseNKOKROM(&nb00Header, 512, true)
+	nkOk00Parse, _, err := patcher_common.ParseNKOKROM(&nb00Header, 512, true)
 	if err != nil {
 		return err
 	}
 
-	nkOk01Parse, _, err := ParseNKOKROM(&nb01Header, 512, true)
+	nkOk01Parse, _, err := patcher_common.ParseNKOKROM(&nb01Header, 512, true)
 	if err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 	if nBytes != fullRomSize {
 		return errors.New("ReadAt failed to read enough bytes")
 	}
-	nkOk00Parse, _, err = ParseNKOKROM(&fullNB00, int64(nBytes), false)
+	nkOk00Parse, _, err = patcher_common.ParseNKOKROM(&fullNB00, int64(nBytes), false)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 	if nBytes != fullRomSize {
 		return errors.New("ReadAt failed to read enough bytes")
 	}
-	nkOk01Parse, rom, err := ParseNKOKROM(&fullNB01, int64(nBytes), false)
+	nkOk01Parse, rom, err := patcher_common.ParseNKOKROM(&fullNB01, int64(nBytes), false)
 	if err != nil {
 		return err
 	}
@@ -114,14 +114,14 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 		return err
 	}
 
-	nkOkRepack, err := PackNKOKROM(nkOk00Parse, patchedRom)
+	nkOkRepack, err := patcher_common.PackNKOKROM(nkOk00Parse, patchedRom)
 	if err != nil {
 		return err
 	}
 
 	log(fmt.Sprintf("PATCHED ROM"))
-	sum4 := CalculateSUM4(&rom, len(rom))
-	sum2 := CalculateSUM2(&rom, len(rom))
+	sum4 := patcher_common.CalculateSUM4(&rom, len(rom))
+	sum2 := patcher_common.CalculateSUM2(&rom, len(rom))
 	log(fmt.Sprintf("--ROM SIZE %#04x %d", len(patchedRom), len(patchedRom)))
 	log(fmt.Sprintf("--SUM2 %#02x", sum2))
 	log(fmt.Sprintf("--SUM4 %#04x\n", sum4))
@@ -157,4 +157,5 @@ var PatchImpl = &patch.Patch{
 	PatchName:  "Remove consent screen on QY7XXX (AZE0, E-NV200) NOT FOR JAPAN!",
 	PatchImage: &previewImg,
 	Patcher:    applyPatch,
+	MediaType:  patch.MediaTypeSD,
 }

@@ -45,7 +45,7 @@ type Result struct {
 const ProbeOffset = 0x4d00000
 
 func Find(f io.ReaderAt, size int64) (Target, error) {
-	f = common.DirectReader(f, size)
+	f = patcher_common.DirectReader(f, size)
 	if t, found, err := probeFixed(f, size); found {
 		return t, err
 	}
@@ -146,7 +146,7 @@ type PageWrite struct {
 }
 
 func planConsentSkip(f io.ReaderAt, size int64, log func(string)) (Result, []PageWrite, error) {
-	f = common.DirectReader(f, size)
+	f = patcher_common.DirectReader(f, size)
 	t, err := Find(f, size)
 	if err != nil {
 		return Result{}, nil, err
@@ -193,7 +193,7 @@ func diffPages(before, mod []byte, base int64) []PageWrite {
 
 // ApplyConsentSkip writes only after PlanConsentSkip finds exactly one handler match.
 func applyConsentSkip(f patch.ReadWriterAt, size int64, log func(string)) error {
-	dev := common.DirectReadWriter(f, size)
+	dev := patcher_common.DirectReadWriter(f, size)
 	res, writes, err := planConsentSkip(dev, size, log)
 	if err != nil {
 		return err
@@ -239,7 +239,7 @@ func applyAndVerify(f patch.ReadWriterAt, target Target, original []byte, writes
 			return failure(fmt.Errorf("cannot write at 0x%x: %w", w.Offset, err))
 		}
 	}
-	s, ok := f.(common.Syncer)
+	s, ok := f.(patcher_common.Syncer)
 	if !ok {
 		return failure(fmt.Errorf("target does not support sync"))
 	}
@@ -259,7 +259,7 @@ func applyAndVerify(f patch.ReadWriterAt, target Target, original []byte, writes
 }
 
 func syncAndVerify(f patch.ReadWriterAt, off int64, want []byte) error {
-	s, ok := f.(common.Syncer)
+	s, ok := f.(patcher_common.Syncer)
 	if !ok {
 		return fmt.Errorf("target does not support sync")
 	}
@@ -473,4 +473,5 @@ var PatchImpl = &patch.Patch{
 	PatchName:  "Remove consent screen on QY8XXX (AZE0, ZE1, E-NV200) NOT FOR JAPAN!",
 	PatchImage: &previewImg,
 	Patcher:    applyConsentSkip,
+	MediaType:  patch.MediaTypeSD,
 }

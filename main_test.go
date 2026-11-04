@@ -4,6 +4,8 @@ import (
 	"LeafSDTools_Companion/disk"
 	"LeafSDTools_Companion/patch"
 	"LeafSDTools_Companion/patch/agree_qy7"
+	patcher_common "LeafSDTools_Companion/patch/common"
+	"LeafSDTools_Companion/patch/gpstimefix_qy7"
 	"LeafSDTools_Companion/patch/wince"
 	"fmt"
 	"os"
@@ -176,5 +178,159 @@ func TestNKOKHeaderInsideDiskIMG(t *testing.T) {
 	err = agree_qy7.PatchImpl.ApplyPatch(f, size, nil)
 	if err != nil {
 		fmt.Println(err)
+	}
+}
+
+func TestPatcherInsertFile(t *testing.T) {
+	imageFile := "../Documents/benchleaf_nand/NB04.nb0tsst"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	p, err := wince.NewExtractor(image)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to analyze %s: %v\n", imageFile, err)
+		return
+	}
+
+	image, err = os.ReadFile("go.mod")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	f, err := p.AddFile("COREXLL.DLL", image, true)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to add file: %v\n", err)
+		return
+	}
+	fmt.Printf("Adding file: %s\n", f.Name)
+	fmt.Printf("           : %v\n", f)
+	p.SaveImage("./NewADDEDFILE.nb0")
+}
+
+func TestPatcherCustomECECHeader(t *testing.T) {
+	imageFile := "../Documents/benchleaf_nand/NB04.nb0"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	ecechdr, _, err := patcher_common.ParseCustomECECHDR(&image, int64(len(image)), false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse %s: %v\n", imageFile, err)
+		return
+	}
+
+	fmt.Printf("Parsed ECEC HDR %v\n", ecechdr)
+
+}
+
+func TestCEDecompress(t *testing.T) {
+	imageFile := "../Documents/benchleaf_nand/NB04.nb0"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	_, rom, err := patcher_common.ParseCustomECECHDR(&image, int64(len(image)), false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse %s: %v\n", imageFile, err)
+		return
+	}
+	p, err := wince.NewExtractor(rom)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to analyze %s: %v\n", imageFile, err)
+		return
+	}
+	fmt.Println("FILES")
+
+	for _, f := range p.Files {
+		fmt.Println(f.Name)
+		fmt.Println("  ", f.Entry.FileAttributes)
+		fmt.Printf("   %+v\n", f.Entry.FileTime.Unix())
+		fmt.Println("  ", f.Entry.RealFileSize)
+		fmt.Println("  ", f.Entry.CompFileSize)
+		fmt.Println("  ", f.Entry.FileNamePtr)
+		fmt.Println("  ", f.Entry.LoadOffset)
+		if f.Name == "default.hv" {
+			dat, err := f.Data()
+			if err != nil {
+				fmt.Println(err)
+				return
+			}
+			os.WriteFile("default.hv", dat, 0644)
+		}
+	}
+
+}
+
+func TestGPSTimeFix(t *testing.T) {
+	imageFile := "../Documents/benchleaf_nand/NB04.nb0"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	ecechdr, rom, err := patcher_common.ParseCustomECECHDR(&image, int64(len(image)), false)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to parse %s: %v\n", imageFile, err)
+		return
+	}
+
+	fmt.Printf("Parsed ECEC HDR %v\n", ecechdr)
+	newRom, patchResult, fileResult, err := gpstimefix_qy7.RunPatch_GPSTimeFixQY7(&rom)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to patch GPSTimeFixQY7: %v\n", err)
+		return
+	}
+
+	fmt.Printf("New ROM LEN %d\n", len(newRom))
+	fmt.Printf("New file %v\n", fileResult)
+	fmt.Printf("PatchResult %v\n", fileResult)
+	fmt.Printf("  PatchAlreadyExisted %v\n", patchResult.AlreadyPatched)
+	fmt.Printf("  PatchApplied %v\n", patchResult.Applied)
+	fmt.Printf("  Section %v\n", patchResult.Section)
+	fmt.Printf("  VirtualAddress %v\n", patchResult.VA)
+
+	_, _, err = patcher_common.FixCustomECECChecksums(newRom)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to fix checksums: %v\n", err)
+		return
+	}
+
+	err = os.WriteFile("gpstimefix.nb00", newRom, 0644)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to save GPSTimeFixQY7: %v\n", err)
+		return
 	}
 }

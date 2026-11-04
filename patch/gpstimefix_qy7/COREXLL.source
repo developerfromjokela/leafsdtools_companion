@@ -1,0 +1,50 @@
+// COREXLL.cpp : Defines the entry point for the DLL application.
+//
+
+#include "stdafx.h"
+
+extern "C" {
+
+// DIRTY HACK:
+   BOOL
+      WINAPI
+      my_SetSystemTime (
+      BYTE *p
+      )
+   {
+
+      SYSTEMTIME st;
+      st.wYear = 2000 + p[0x10];
+      st.wMonth  = p[0x11];
+      st.wDayOfWeek = 0;
+      st.wDay    = p[0x12];
+      st.wHour     = p[0x13];
+      st.wMinute    = p[0x14];
+      st.wSecond     = p[0x15];
+      st.wMilliseconds  = 0;
+
+      union  
+      {
+         ULARGE_INTEGER li;
+         FILETIME ft;
+      } ft;
+
+      SystemTimeToFileTime(&st, &ft.ft);
+      ft.li.QuadPart += 0x1600A391000000ui64; 
+      FileTimeToSystemTime(&ft.ft, &st);
+
+      p[0x10] = st.wYear%100;
+      p[0x11] = st.wMonth;
+      p[0x12] = st.wDay;
+      p[0x13] = st.wHour;
+      p[0x14] = st.wMinute;
+      p[0x15] = st.wSecond;
+
+      ft.li.QuadPart += 10000000ui64;
+      FileTimeToSystemTime(&ft.ft, &st);
+      return SetSystemTime(&st);
+   }
+
+   
+
+};

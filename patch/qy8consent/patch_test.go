@@ -229,7 +229,7 @@ type faultRWAt struct {
 
 func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%common.directAlign != 0 || len(p)%common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%common.directAlign != 0 {
+		if off%patcher_common.directAlign != 0 || len(p)%patcher_common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%patcher_common.directAlign != 0 {
 			return 0, fmt.Errorf("unaligned read")
 		}
 	}
@@ -238,7 +238,7 @@ func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 
 func (f *faultRWAt) WriteAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%common.directAlign != 0 || len(p)%common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%common.directAlign != 0 {
+		if off%patcher_common.directAlign != 0 || len(p)%patcher_common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%patcher_common.directAlign != 0 {
 			return 0, fmt.Errorf("unaligned write")
 		}
 	}
@@ -330,7 +330,7 @@ func TestDirectIOFindUsesAlignedRequests(t *testing.T) {
 func TestDirectIOApplyUsesAlignedRequests(t *testing.T) {
 	original := bytes.Repeat([]byte{0x31}, 3*pageSize)
 	f := &faultRWAt{b: bytes.Clone(original), direct: true}
-	dev := common.directReadWriter(f, int64(len(original)))
+	dev := patcher_common.directReadWriter(f, int64(len(original)))
 	want := bytes.Repeat([]byte{0x72}, 173)
 	writes := []PageWrite{{Offset: 123, Data: want}}
 	if err := applyAndVerify(dev, Target{Size: len(original)}, original, writes); err != nil {

@@ -76,6 +76,9 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 	var imagePath string
 	var selectedDevice disk.Device
 	var selectedPatch *patch.Patch
+	var modeRadio *widget.RadioGroup
+	var refreshBtn *widget.Button
+	var chooseImageBtn *widget.Button
 	deviceByLabel := map[string]disk.Device{}
 
 	patches := AllPatches()
@@ -93,6 +96,8 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 
 	patchNameLabel := widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{Italic: true})
 	patchNameLabel.Hide()
+
+	deviceSelect := widget.NewSelect(nil, nil)
 
 	patchSelect := widget.NewSelect(patchNames, func(name string) {
 		p, ok := patchByName[name]
@@ -112,13 +117,21 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 		}
 		patchNameLabel.SetText(p.PatchName)
 		patchNameLabel.Show()
+		if p.MediaType == patch.MediaTypeSD {
+			modeRadio.Show()
+			chooseImageBtn.SetText("Choose .img file...")
+		} else if p.MediaType == patch.MediaTypeNAND {
+			refreshBtn.Hide()
+			modeRadio.SetSelected("Disk image (.img)")
+			modeRadio.Hide()
+			chooseImageBtn.SetText("Choose nand_xx.bin..")
+		}
 	})
 	patchSelect.PlaceHolder = "Select patch..."
 
 	imageLabel := widget.NewLabel("No image selected")
 	imageLabel.Wrapping = fyne.TextWrapWord
 
-	deviceSelect := widget.NewSelect(nil, nil)
 	deviceSelect.PlaceHolder = "Select device..."
 	deviceSelect.Hide()
 
@@ -139,8 +152,14 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 		deviceSelect.Refresh()
 	}
 
-	chooseImageBtn := widget.NewButton("Choose .img file...", func() {
-		filename, err := filedialog.File().Filter("Disk Image", "img").Load()
+	chooseImageBtn = widget.NewButton("Choose .img file...", func() {
+		var mediaTypeDesc = "DiskImage"
+		var mediaTypeExtension = "DiskImage"
+		if selectedPatch.MediaType == patch.MediaTypeNAND {
+			mediaTypeDesc = "NAND Dump (nand_xx.bin)"
+			mediaTypeExtension = ".bin"
+		}
+		filename, err := filedialog.File().Filter(mediaTypeDesc, mediaTypeExtension).Load()
 		if err != nil {
 			LogAppend("Open dialog error: " + err.Error())
 			return
@@ -152,13 +171,13 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 		imageLabel.SetText(filepath.Base(filename))
 	})
 
-	refreshBtn := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), refreshDevices)
+	refreshBtn = widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), refreshDevices)
 	refreshBtn.Hide()
 
 	deviceRow := container.NewBorder(nil, nil, nil, refreshBtn, deviceSelect)
 	deviceRow.Hide()
 
-	modeRadio := widget.NewRadioGroup([]string{"Disk image (.img)", "Physical device"}, func(s string) {
+	modeRadio = widget.NewRadioGroup([]string{"Disk image (.img)", "Physical device"}, func(s string) {
 		switch s {
 		case "Disk image (.img)":
 			chooseImageBtn.Show()
@@ -200,17 +219,16 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 			statusText = "Device: " + d.String()
 		} else {
 			if imagePath == "" {
-				LogAppend("Please choose an image file first.")
+				LogAppend("Please choose a file first.")
 				return
 			}
 			target = imagePath
-			statusText = "Image: " + filepath.Base(imagePath)
+			statusText = "File: " + filepath.Base(imagePath)
 		}
 
 		msg := widget.NewLabel(
 			"Patching modifies the original data and cannot be undone.\n\n" +
-				"Before continuing, make sure you have a full backup of your original SD card.\n\n" +
-				"If you have NOT made a backup yet, press Cancel and use the Backup tab first.")
+				"Before continuing, make sure you have a full backup of your original SD card or NAND.\n\nFor SD, use Backup tab. For NAND, make a duplicate file of nand_xx.bin as a backup.")
 		msg.Wrapping = fyne.TextWrapWord
 
 		d := dialog.NewCustomConfirm(

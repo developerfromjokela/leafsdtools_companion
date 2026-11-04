@@ -41,7 +41,7 @@ func (e *Extractor) AddFile(name string, data []byte, compress bool) (*File, err
 	payload := data
 	attrs := uint32(attrStored)
 	if compress && len(data) > 0 {
-		comp, err := lzxCompress(data)
+		comp, err := CECompress(data, 4096)
 		if err != nil {
 			return nil, err
 		}

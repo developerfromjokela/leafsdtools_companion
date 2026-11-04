@@ -4,6 +4,7 @@ import (
 	"LeafSDTools_Companion/disk"
 	"LeafSDTools_Companion/patch"
 	"LeafSDTools_Companion/patch/agree_qy7"
+	"LeafSDTools_Companion/patch/gpstimefix_qy7"
 	"LeafSDTools_Companion/patch/qy8consent"
 	"image/color"
 	"strings"
@@ -82,5 +83,6 @@ func AllPatches() []*patch.Patch {
 	return []*patch.Patch{
 		qy8consent.PatchImpl,
 		agree_qy7.PatchImpl,
+		gpstimefix_qy7.PatchImpl,
 	}
 }

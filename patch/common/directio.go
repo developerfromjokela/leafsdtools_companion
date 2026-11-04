@@ -1,4 +1,4 @@
-package common
+package patcher_common
 
 import (
 	"LeafSDTools_Companion/patch"
