@@ -7,7 +7,7 @@ This utility is a helper utility for [LeafSDTools](https://github.com/developerf
 - Backup and Restore SD card
 - Patches
   - Removing consent screen (OK/Decline on startup) for QY8XXX and QY7XXX (AZE0, ZE1, E-NV200 all generations)
-  - Fixing GPS Rollover, causing climate ctrl. and charging timer sync issue
+  - Fixing GPS Rollover, causing climate ctrl. and charging timer sync issue on all QY7XXX EV models
 
 ## Windows
 Please run the program as administrator, sometimes Windows does some nasty things and writes fail.
