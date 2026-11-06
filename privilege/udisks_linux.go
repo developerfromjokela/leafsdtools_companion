@@ -33,13 +33,6 @@ func blockDeviceSize(f *os.File) (int64, error) {
 	return int64(size), nil
 }
 
-func deviceSizeForHelper(f *os.File) (int64, error) {
-	if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
-		return fi.Size(), nil
-	}
-	return blockDeviceSize(f)
-}
-
 func openViaUDisks2(devicePath, mode string, tryDirect bool) (*DirectCapableFile, int64, error) {
 	conn, err := dbus.ConnectSystemBus()
 	if err != nil {
