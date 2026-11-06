@@ -94,7 +94,16 @@ func CreateDiskImage(srcPath, dstPath string, bufSize int, progress ProgressFunc
 			}
 		}
 	}
-
+	if total <= 0 {
+		if devs, lerr := ListDevices(); lerr == nil {
+			for _, d := range devs {
+				if d.Path == srcPath {
+					total = d.Size
+					break
+				}
+			}
+		}
+	}
 	out, err := os.OpenFile(dstPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("creating destination %q: %w", dstPath, err)

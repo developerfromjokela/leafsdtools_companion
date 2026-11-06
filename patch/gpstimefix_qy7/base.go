@@ -18,9 +18,8 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 	if size > 10*1024*1024 {
 		return errors.New("size too big for a NAND dump, are you sure you have chosen correct file?")
 	}
-	dev := patcher_common.DirectReadWriter(f, size)
 	romHeader := make([]byte, 512)
-	nBytes, err := dev.ReadAt(romHeader, nb04Offset)
+	nBytes, err := f.ReadAt(romHeader, nb04Offset)
 	if err != nil {
 		return err
 	}
@@ -41,7 +40,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 	var fullRomSize = int(customECECHDR.RomSize)
 	fullROM := make([]byte, fullRomSize)
 
-	nBytes, err = dev.ReadAt(fullROM, nb04Offset)
+	nBytes, err = f.ReadAt(fullROM, nb04Offset)
 	if err != nil {
 		return err
 	}

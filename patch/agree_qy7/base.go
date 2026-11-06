@@ -8,25 +8,19 @@ import (
 	"fmt"
 )
 
-const (
-	nb00Offset = 0x00200000
-	nb01Offset = 0x02000000
-)
-
 // IMPL BasePatch
 
 func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
-	dev := patcher_common.DirectReadWriter(f, size)
 	nb00Header := make([]byte, 512)
 	nb01Header := make([]byte, 512)
-	nBytes, err := dev.ReadAt(nb00Header, nb00Offset)
+	nBytes, err := f.ReadAt(nb00Header, patcher_common.QY7nb00Offset)
 	if err != nil {
 		return err
 	}
 	if nBytes != 512 {
 		return errors.New("ReadAt failed to read enough bytes")
 	}
-	nBytes, err = dev.ReadAt(nb01Header, nb01Offset)
+	nBytes, err = f.ReadAt(nb01Header, patcher_common.QY7nb01Offset)
 	if err != nil {
 		return err
 	}
@@ -57,7 +51,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 	fullNB00 := make([]byte, 512+nkOk00Parse.RomSize)
 	fullNB01 := make([]byte, 512+nkOk00Parse.RomSize)
 
-	nBytes, err = dev.ReadAt(fullNB00, nb00Offset)
+	nBytes, err = f.ReadAt(fullNB00, patcher_common.QY7nb00Offset)
 	if err != nil {
 		return err
 	}
@@ -69,7 +63,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 		return err
 	}
 
-	nBytes, err = dev.ReadAt(fullNB01, nb01Offset)
+	nBytes, err = f.ReadAt(fullNB01, patcher_common.QY7nb01Offset)
 	if err != nil {
 		return err
 	}
@@ -132,7 +126,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 
 	log("Writing NB00 back to disk..")
 
-	at, err := f.WriteAt(nkOkRepack, nb00Offset)
+	at, err := f.WriteAt(nkOkRepack, patcher_common.QY7nb00Offset)
 	if err != nil {
 		return err
 	}
@@ -140,7 +134,7 @@ func applyPatch(f patch.ReadWriterAt, size int64, log func(string)) error {
 		return errors.New("failed to write enough bytes for nb00 offset")
 	}
 	log("Writing NB01 back to disk..")
-	at, err = f.WriteAt(nkOkRepack, nb01Offset)
+	at, err = f.WriteAt(nkOkRepack, patcher_common.QY7nb01Offset)
 	if at != fullRomSize {
 		return errors.New("failed to write enough bytes for nb01 offset")
 	}

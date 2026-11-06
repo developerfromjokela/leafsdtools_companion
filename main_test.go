@@ -4,6 +4,7 @@ import (
 	"LeafSDTools_Companion/disk"
 	"LeafSDTools_Companion/patch"
 	"LeafSDTools_Companion/patch/agree_qy7"
+	"LeafSDTools_Companion/patch/btdun_qy7"
 	patcher_common "LeafSDTools_Companion/patch/common"
 	"LeafSDTools_Companion/patch/gpstimefix_qy7"
 	"LeafSDTools_Companion/patch/wince"
@@ -332,5 +333,32 @@ func TestGPSTimeFix(t *testing.T) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to save GPSTimeFixQY7: %v\n", err)
 		return
+	}
+}
+
+func TestDUNPatcher(t *testing.T) {
+	imageFile := "../Documents/EliminateOk/myhu/NB01.nb0"
+
+	if st, err := os.Stat(imageFile); err != nil || !st.Mode().IsRegular() {
+		fmt.Fprintf(os.Stderr, "Cannot find file: %s\n", imageFile)
+		return
+	}
+
+	image, err := os.ReadFile(imageFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot read %s: %v\n", imageFile, err)
+		return
+	}
+
+	_, patchResults, patchErr := btdun_qy7.RunPatch_BTDUNQY7(&image)
+	if patchErr != nil {
+		fmt.Fprintf(os.Stderr, "Failed to patch DUN: %v\n", patchErr)
+		panic(patchErr)
+	}
+	for i, patchResult := range *patchResults {
+		if patchResult.AlreadyPatched {
+			fmt.Printf("FuncPatch(%d) WARN: Function already patched! Skipped..\n", i)
+		}
+		fmt.Printf("FuncPatch(%d) in %s %v at VA %d (%#08x)\n", i, patchResult.Section, patchResult.Applied, patchResult.VA, patchResult.VA)
 	}
 }

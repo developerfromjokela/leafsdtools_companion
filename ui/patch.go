@@ -182,10 +182,10 @@ func BuildPatchTab(window *fyne.Window) fyne.CanvasObject {
 			return
 		}
 		var mediaTypeDesc = "DiskImage"
-		var mediaTypeExtension = "DiskImage"
+		var mediaTypeExtension = "img"
 		if selectedPatch.MediaType == patch.MediaTypeNAND {
 			mediaTypeDesc = "NAND Dump (nand_xx.bin)"
-			mediaTypeExtension = ".bin"
+			mediaTypeExtension = "bin"
 		}
 		filename, err := filedialog.File().Filter(mediaTypeDesc, mediaTypeExtension).Load()
 		if err != nil {

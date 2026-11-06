@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unsafe"
 
 	"github.com/godbus/dbus/v5"
 	"golang.org/x/sys/unix"
@@ -22,6 +23,22 @@ type DirectCapableFile struct {
 // DirectIO reports whether writes/reads on this file bypass the page cache
 // (opened with O_DIRECT).
 func (d *DirectCapableFile) DirectIO() bool { return d.direct }
+
+func blockDeviceSize(f *os.File) (int64, error) {
+	var size uint64
+	_, _, errno := unix.Syscall(unix.SYS_IOCTL, f.Fd(), unix.BLKGETSIZE64, uintptr(unsafe.Pointer(&size)))
+	if errno != 0 {
+		return 0, errno
+	}
+	return int64(size), nil
+}
+
+func deviceSizeForHelper(f *os.File) (int64, error) {
+	if fi, err := f.Stat(); err == nil && fi.Size() > 0 {
+		return fi.Size(), nil
+	}
+	return blockDeviceSize(f)
+}
 
 func openViaUDisks2(devicePath, mode string, tryDirect bool) (*DirectCapableFile, int64, error) {
 	conn, err := dbus.ConnectSystemBus()
@@ -79,6 +96,11 @@ func openViaUDisks2(devicePath, mode string, tryDirect bool) (*DirectCapableFile
 	var size int64
 	if fi, statErr := f.Stat(); statErr == nil {
 		size = fi.Size()
+	}
+	if size <= 0 {
+		if sz, szErr := blockDeviceSize(f); szErr == nil {
+			size = sz
+		}
 	}
 	return &DirectCapableFile{File: f, direct: direct}, size, nil
 }
