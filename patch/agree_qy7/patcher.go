@@ -413,7 +413,7 @@ func ExtractAllStateTables(binaryData []byte, sections *[]wince.Section) ([]stri
 	}
 	otherRes, err := OtherStatesAnalysis(binaryData)
 	if err != nil {
-		return nil, nil, fmt.Errorf("other states error:", err)
+		return nil, nil, fmt.Errorf("other states error: %w", err)
 	}
 
 	var textSection *wince.Section = nil
