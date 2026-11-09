@@ -474,7 +474,7 @@ func skipBody(d Derived) []uint32 {
 var previewImg []byte
 
 var PatchImpl = &patch.Patch{
-	PatchName:  "Remove consent screen on QY8XXX (AZE0, ZE1, E-NV200) NOT FOR JAPAN!",
+	PatchName:  "Remove consent screen on QY8XXX (AZE0, ZE1, E-NV200, Japanese cards too)",
 	PatchImage: &previewImg,
 	Patcher:    applyConsentSkip,
 	MediaType:  patch.MediaTypeSD,
