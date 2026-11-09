@@ -218,6 +218,9 @@ func (m *memRWAt) WriteAt(p []byte, off int64) (int, error) {
 }
 func (m *memRWAt) Sync() error { return nil }
 
+// directAlign mirrors patch/common's unexported constant.
+const directAlign = 4096
+
 type faultRWAt struct {
 	b      []byte
 	writes int
@@ -229,7 +232,7 @@ type faultRWAt struct {
 
 func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%patcher_common.directAlign != 0 || len(p)%patcher_common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%patcher_common.directAlign != 0 {
+		if off%directAlign != 0 || len(p)%directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%directAlign != 0 {
 			return 0, fmt.Errorf("unaligned read")
 		}
 	}
@@ -238,7 +241,7 @@ func (f *faultRWAt) ReadAt(p []byte, off int64) (int, error) {
 
 func (f *faultRWAt) WriteAt(p []byte, off int64) (int, error) {
 	if f.direct {
-		if off%patcher_common.directAlign != 0 || len(p)%patcher_common.directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%patcher_common.directAlign != 0 {
+		if off%directAlign != 0 || len(p)%directAlign != 0 || uintptr(unsafe.Pointer(&p[0]))%directAlign != 0 {
 			return 0, fmt.Errorf("unaligned write")
 		}
 	}
@@ -330,7 +333,7 @@ func TestDirectIOFindUsesAlignedRequests(t *testing.T) {
 func TestDirectIOApplyUsesAlignedRequests(t *testing.T) {
 	original := bytes.Repeat([]byte{0x31}, 3*pageSize)
 	f := &faultRWAt{b: bytes.Clone(original), direct: true}
-	dev := patcher_common.directReadWriter(f, int64(len(original)))
+	dev := patcher_common.DirectReadWriter(f, int64(len(original)))
 	want := bytes.Repeat([]byte{0x72}, 173)
 	writes := []PageWrite{{Offset: 123, Data: want}}
 	if err := applyAndVerify(dev, Target{Size: len(original)}, original, writes); err != nil {
@@ -362,7 +365,7 @@ func patchCopy(t *testing.T, data []byte) ([]byte, error) {
 	cp := bytes.Clone(data)
 	f := &memRWAt{cp}
 
-	err := Qy8ConsentPathImpl.Patcher(f, int64(len(cp)), func(s string) { t.Log(s) })
+	err := PatchImpl.Patcher(f, int64(len(cp)), func(s string) { t.Log(s) })
 	return cp, err
 }
 

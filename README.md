@@ -6,7 +6,7 @@ This utility is a helper utility for [LeafSDTools](https://github.com/developerf
 - Make hidden system partitions visible on SD Card
 - Backup and Restore SD card
 - Patches
-  - Removing consent screen (OK/Decline on startup) for QY8XXX and QY7XXX (AZE0, ZE1, E-NV200 all generations)
+  - Removing consent screen (OK/Decline on startup) for QY8XXX and QY7XXX (AZE0, ZE1, E-NV200 all generations). QY8XXX covers Japanese cards as well; QY7XXX does not.
   - Fixing GPS Rollover, causing climate ctrl. and charging timer sync issue on all QY7XXX EV models
   - Enabling Bluetooth DUN for CARWINGS (QY7XXX, ZE0, AZE0, E-NV200 until 2017)
 
