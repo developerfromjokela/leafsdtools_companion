@@ -327,10 +327,14 @@ func patchMod(mod []byte, name string, log func(string)) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	seg0End := cs[len(cs)-1].at + cs[len(cs)-1].sectors*sectorSize
-	rom := make([]byte, 0, len(seg0)+len(mod)-seg0End)
+	more, segsEnd, err := nextSegments(mod, cs)
+	if err != nil {
+		return Result{}, err
+	}
+	rom := make([]byte, 0, len(seg0)+len(more)+len(mod)-segsEnd)
 	rom = append(rom, seg0...)
-	rom = append(rom, mod[seg0End:]...)
+	rom = append(rom, more...)
+	rom = append(rom, mod[segsEnd:]...)
 
 	d, err := derive(seg0, rom)
 	if err != nil {
